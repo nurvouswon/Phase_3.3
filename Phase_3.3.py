@@ -576,10 +576,15 @@ if event_file is not None and today_file is not None:
     X_combined = dedup_columns(X_combined)
 
     st.write("📈 Fitting XGBoost to rank combined features...")
-    xgb = XGBClassifier(n_estimators=100, random_state=42, n_jobs=-1, use_label_encoder=False, eval_metric='logloss')
-    xgb.fit(X_combined, y)
-
-    coefs = pd.Series(xgb.feature_importances_, index=X_combined.columns)
+        xgb_model = xgb.XGBClassifier(
+        n_estimators=100,
+        random_state=42,
+        n_jobs=-1,
+        use_label_encoder=False,
+        eval_metric='logloss'
+    )
+    xgb_model.fit(X_combined, y)
+    coefs = pd.Series(xgb_model.feature_importances_, index=X_combined.columns)
 
     # Deduplicate coefficients index just in case
     coefs = coefs.loc[~coefs.index.duplicated()]
