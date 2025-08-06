@@ -576,7 +576,7 @@ if event_file is not None and today_file is not None:
     X_combined = dedup_columns(X_combined)
 
     st.write("📈 Fitting XGBoost to rank combined features...")
-        xgb_model = xgb.XGBClassifier(
+    xgb_model = xgb.XGBClassifier(
         n_estimators=100,
         random_state=42,
         n_jobs=-1,
