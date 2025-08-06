@@ -657,20 +657,20 @@ if event_file is not None and today_file is not None:
     # ---- KFold Setup ----
     n_splits = 2
     n_repeats = 1
-    st.write(f"Preparing KFold splits: X {X_train.shape}, y {y_train.shape}, X_today {X_today.shape}")
+    st.write(f"Preparing KFold splits: X {X_train_selected.shape}, y {y_train_selected.shape}, X_today {X_today.shape}")
 
     rskf = RepeatedStratifiedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=42)
 
-    val_fold_probas = np.zeros((len(y_train), 8))
+    val_fold_probas = np.zeros((len(y_train_selected), 8))
     test_fold_probas = np.zeros((X_today.shape[0], 8))
     scaler = StandardScaler()
     fold_times = []
     show_shap = st.checkbox("Show SHAP Feature Importance (slow, only for small datasets)", value=False)
 
-    for fold, (tr_idx, va_idx) in enumerate(rskf.split(X_train, y_train)):
+    for fold, (tr_idx, va_idx) in enumerate(rskf.split(X_train_selected, y_train_selected)):
         t_fold_start = time.time()
-        X_tr, X_va = X_train.iloc[tr_idx], X_train.iloc[va_idx]
-        y_tr, y_va = y_train.iloc[tr_idx], y_train.iloc[va_idx]
+        X_tr, X_va = X_train_selected.iloc[tr_idx], X_train_selected.iloc[va_idx]
+        y_tr, y_va = y_train_selected.iloc[tr_idx], y_train_selected.iloc[va_idx]
         sc = scaler.fit(X_tr)
         X_tr_scaled = sc.transform(X_tr)
         X_va_scaled = sc.transform(X_va)
