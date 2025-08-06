@@ -643,7 +643,7 @@ if event_file is not None and today_file is not None:
         y_oos = y.iloc[-OOS_ROWS:].copy()
 
     # ===== Sampling for Streamlit Cloud =====
-    max_rows = 15000
+    max_rows = 30000
 
     # Add defensive checks
     if 'X_train' not in locals() or X_train.empty:
