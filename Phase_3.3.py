@@ -568,93 +568,91 @@ if event_file is not None and today_file is not None:
             st.write(f"🔢 Cross-feature matrix shape: {X_cross.shape}")
             st.write("Sample cross features:", X_cross.iloc[:, :5].head(3))
 
-    # --- Step 3: Combine and re-rank all features (base + cross) ---
-    st.write("🧩 Combining base and cross features...")
-    X_combined = pd.concat([X[top_base_features], X_cross], axis=1)
+        # --- Step 3: Combine and re-rank all features (base + cross) ---
+        st.write("🧩 Combining base and cross features...")
+        X_combined = pd.concat([X[top_base_features], X_cross], axis=1)
 
-    # Deduplicate combined features too, just in case
-    X_combined = dedup_columns(X_combined)
+        # Deduplicate combined features too, just in case
+        X_combined = dedup_columns(X_combined)
 
-    st.write("📈 Fitting logistic regression to rank combined features...")
-    lr = LogisticRegression(max_iter=1000, solver='liblinear')
-    lr.fit(X_combined, y)
-    coefs = pd.Series(np.abs(lr.coef_[0]), index=X_combined.columns)
+        st.write("📈 Fitting logistic regression to rank combined features...")
+        lr = LogisticRegression(max_iter=1000, solver='liblinear')
+        lr.fit(X_combined, y)
+        coefs = pd.Series(np.abs(lr.coef_[0]), index=X_combined.columns)
 
-    # Deduplicate coefficients index just in case
-    coefs = coefs.loc[~coefs.index.duplicated()]
+        # Deduplicate coefficients index just in case
+        coefs = coefs.loc[~coefs.index.duplicated()]
 
-    top_combined_features = coefs.sort_values(ascending=False).head(40).index.tolist()
-    st.write("🏁 Top combined features selected:", top_combined_features)
+        top_combined_features = coefs.sort_values(ascending=False).head(200).index.tolist()
+        st.write("🏁 Top combined features selected:", top_combined_features)
 
-    # --- Final output ---
-    st.write("🧼 Finalizing selected features...")
+        # --- Final output ---
+        st.write("🧼 Finalizing selected features...")
 
-    X_selected = X_combined[top_combined_features].copy()
+        X_selected = X_combined[top_combined_features].copy()
 
-    # Align X_today to match columns and fill safely
-    common_cols = X_selected.columns.intersection(X_today.columns)
-    X_today_selected = X_today[common_cols].copy()
+        # Align X_today to match columns and fill safely
+        common_cols = X_selected.columns.intersection(X_today.columns)
+        X_today_selected = X_today[common_cols].copy()
 
-    # Reindex to ensure order matches X_selected, fill missing columns with -1
-    X_today_selected = X_today_selected.reindex(columns=X_selected.columns, fill_value=-1)
+        # Reindex to ensure order matches X_selected, fill missing columns with -1
+        X_today_selected = X_today_selected.reindex(columns=X_selected.columns, fill_value=-1)
 
-    # Deduplicate final X_today_selected columns just in case
-    X_today_selected = dedup_columns(X_today_selected)
+        # Deduplicate final X_today_selected columns just in case
+        X_today_selected = dedup_columns(X_today_selected)
 
-    # Convert types FIRST before showing
-    try:
-        X_selected = X_selected.astype(np.float64)
-        X_today_selected = X_today_selected.astype(np.float64)
-        st.success("✅ Converted feature matrices to float64 for Streamlit compatibility")
-    except Exception as e:
-        st.error(f"❌ Conversion to float64 failed: {e}")
+        # Convert types FIRST before showing
+        try:
+            X_selected = X_selected.astype(np.float64)
+            X_today_selected = X_today_selected.astype(np.float64)
+            st.success("✅ Converted feature matrices to float64 for Streamlit compatibility")
+        except Exception as e:
+            st.error(f"❌ Conversion to float64 failed: {e}")
 
-    # NOW safe to debug and display
-    feature_debug(X_today_selected)
-    st.dataframe(X_today_selected)
+        # NOW safe to debug and display
+        feature_debug(X_today_selected)
+        st.dataframe(X_today_selected)
 
-    # Final output confirmation
-    st.write(f"✅ Final selected feature shape: {X_selected.shape}")
-    st.write("🎯 Feature engineering and selection complete.")
+        # Final output confirmation
+        st.write(f"✅ Final selected feature shape: {X_selected.shape}")
 
-    # --- Output preview ---
-    st.write("📋 Preview of today's selected features:")
-    st.dataframe(X_today_selected)
-        
-    # ========== OOS TEST =============
-    OOS_ROWS = min(2000, len(X) // 4)  # Dynamic OOS size based on dataset
-    if len(X) <= OOS_ROWS:
-        st.warning(f"Dataset too small for OOS test. Using all {len(X)} rows for training.")
-        X_train = X.copy()
-        y_train = y.copy()
-        X_oos = pd.DataFrame()
-        y_oos = pd.Series()
-    else:
-        X_train = X.iloc[:-OOS_ROWS].copy()
-        y_train = y.iloc[:-OOS_ROWS].copy()
-        X_oos = X.iloc[-OOS_ROWS:].copy()
-        y_oos = y.iloc[-OOS_ROWS:].copy()
+        # ========== OOS TEST =============
+        OOS_ROWS = min(2000, len(X) // 4)  # Dynamic OOS size based on dataset
+        if len(X) <= OOS_ROWS:
+            st.warning(f"Dataset too small for OOS test. Using all {len(X)} rows for training.")
+            X_train = X.copy()
+            y_train = y.copy()
+            X_oos = pd.DataFrame()
+            y_oos = pd.Series()
+        else:
+            X_train = X.iloc[:-OOS_ROWS].copy()
+            y_train = y.iloc[:-OOS_ROWS].copy()
+            X_oos = X.iloc[-OOS_ROWS:].copy()
+            y_oos = y.iloc[-OOS_ROWS:].copy()
 
-    # ===== Sampling for Streamlit Cloud =====
-    max_rows = 15000
+        # ===== Sampling for Streamlit Cloud =====
+        max_rows = 15000
 
-    # Add defensive checks
-    if 'X_train' not in locals() or X_train.empty:
-        st.error("CRITICAL: X_train not properly initialized. Using full dataset as fallback.")
-        X_train = X.copy()
-        y_train = y.copy()
+        # Add defensive checks
+        if 'X_train' not in locals() or X_train.empty:
+            st.error("CRITICAL: X_train not properly initialized. Using full dataset as fallback.")
+            X_train = X.copy()
+            y_train = y.copy()
 
-    if X_train.shape[0] > max_rows:
-        st.warning(f"Training limited to {max_rows} rows for memory (full dataset was {X_train.shape[0]} rows).")
-        X_train = X_train.iloc[:max_rows].copy()
-        y_train = y_train.iloc[:max_rows].copy()
+        if X_train.shape[0] > max_rows:
+            st.warning(f"Training limited to {max_rows} rows for memory (full dataset was {X_train.shape[0]} rows).")
+            X_train = X_train.iloc[:max_rows].copy()
+            y_train = y_train.iloc[:max_rows].copy()
 
-    # Final validation
-    if X_train.empty or y_train.empty:
-        st.error("FATAL: No training data available after sampling. Check your input data.")
-        st.stop()
+        # Final validation
+        if X_train.empty or y_train.empty:
+            st.error("FATAL: No training data available after sampling. Check your input data.")
+            st.stop()
 
-    st.write(f"✅ Final training data: {X_train.shape[0]} rows, {X_train.shape[1]} features")
+        X_train_selected = X_selected.copy()
+        y_train_selected = y.copy()
+
+        st.write(f"✅ Final training data: {X_train_selected.shape[0]} rows, {X_train_selected.shape[1]} features")
 
     # ---- KFold Setup ----
     n_splits = 2
