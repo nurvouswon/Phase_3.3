@@ -575,21 +575,15 @@ if event_file is not None and today_file is not None:
     # Deduplicate combined features too, just in case
     X_combined = dedup_columns(X_combined)
 
-    st.write("📈 Fitting XGBoost to rank combined features...")
-    xgb_model = xgb.XGBClassifier(
-        n_estimators=100,
-        random_state=42,
-        n_jobs=-1,
-        use_label_encoder=False,
-        eval_metric='logloss'
-    )
-    xgb_model.fit(X_combined, y)
-    coefs = pd.Series(xgb_model.feature_importances_, index=X_combined.columns)
+    st.write("📈 Fitting logistic regression to rank combined features...")
+    lr = LogisticRegression(max_iter=1000, solver='liblinear')
+    lr.fit(X_combined, y)
+    coefs = pd.Series(np.abs(lr.coef_[0]), index=X_combined.columns)
 
     # Deduplicate coefficients index just in case
     coefs = coefs.loc[~coefs.index.duplicated()]
 
-    top_combined_features = coefs.sort_values(ascending=False).head(300).index.tolist()  # <-- 200 here!
+    top_combined_features = coefs.sort_values(ascending=False).head250).index.tolist()  # <-- 200 here!
     st.write("🏁 Top combined features selected:", top_combined_features)
 
     # --- Final output ---
