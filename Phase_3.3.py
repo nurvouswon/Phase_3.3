@@ -593,9 +593,7 @@ if event_file is not None and today_file is not None:
 
     # Align X_today to match columns and fill safely
     common_cols = X_selected.columns.intersection(X_today.columns)
-    X_today_selected = X_today[common_cols].copy()
-
-    # Reindex to ensure order matches X_selected, fill missing columns with -1
+    X_today_selected = X_today[X_selected.columns].copy()  # Limit X_today_selected to top 200 features
     X_today_selected = X_today_selected.reindex(columns=X_selected.columns, fill_value=-1)
 
     # Deduplicate final X_today_selected columns just in case
@@ -661,7 +659,7 @@ if event_file is not None and today_file is not None:
         y_tr, y_va = y_train_selected.iloc[tr_idx], y_train_selected.iloc[va_idx]
         sc = scaler.fit(X_tr)
         X_tr_scaled = sc.transform(X_tr)
-        X
+        X_va_scaled = sc.transform(X_va)
 
         # --- Optimized Tree Model Instantiations ---
         xgb_clf = xgb.XGBClassifier(
