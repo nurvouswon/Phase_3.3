@@ -620,37 +620,25 @@ if event_file is not None and today_file is not None:
     OOS_ROWS = min(2000, len(X) // 4)  # Dynamic OOS size based on dataset
     if len(X) <= OOS_ROWS:
         st.warning(f"Dataset too small for OOS test. Using all {len(X)} rows for training.")
-        X_train = X.copy()
-        y_train = y.copy()
-        X_oos = pd.DataFrame()
-        y_oos = pd.Series()
+        X_train_selected = X.copy()
+        y_train_selected = y.copy()
     else:
-        X_train = X.iloc[:-OOS_ROWS].copy()
-        y_train = y.iloc[:-OOS_ROWS].copy()
-        X_oos = X.iloc[-OOS_ROWS:].copy()
-        y_oos = y.iloc[-OOS_ROWS:].copy()
+        X_train_selected = X.iloc[:-OOS_ROWS].copy()
+        y_train_selected = y.iloc[:-OOS_ROWS].copy()
 
     # ===== Sampling for Streamlit Cloud =====
     max_rows = 15000
 
     # Add defensive checks
-    if 'X_train' not in locals() or X_train.empty:
-        st.error("CRITICAL: X_train not properly initialized. Using full dataset as fallback.")
-        X_train = X.copy()
-        y_train = y.copy()
-
-    if X_train.shape[0] > max_rows:
-        st.warning(f"Training limited to {max_rows} rows for memory (full dataset was {X_train.shape[0]} rows).")
-        X_train = X_train.iloc[:max_rows].copy()
-        y_train = y_train.iloc[:max_rows].copy()
+    if X_train_selected.shape[0] > max_rows:
+        st.warning(f"Training limited to {max_rows} rows for memory (full dataset was {X_train_selected.shape[0]} rows).")
+        X_train_selected = X_train_selected.iloc[:max_rows].copy()
+        y_train_selected = y_train_selected.iloc[:max_rows].copy()
 
     # Final validation
-    if X_train.empty or y_train.empty:
+    if X_train_selected.empty or y_train_selected.empty:
         st.error("FATAL: No training data available after sampling. Check your input data.")
         st.stop()
-
-    X_train_selected = X_selected.copy()
-    y_train_selected = y.copy()
 
     st.write(f"✅ Final training data: {X_train_selected.shape[0]} rows, {X_train_selected.shape[1]} features")
 
@@ -673,8 +661,7 @@ if event_file is not None and today_file is not None:
         y_tr, y_va = y_train_selected.iloc[tr_idx], y_train_selected.iloc[va_idx]
         sc = scaler.fit(X_tr)
         X_tr_scaled = sc.transform(X_tr)
-        X_va_scaled = sc.transform(X_va)
-        X_today_scaled = sc.transform(X_today)
+        X
 
         # --- Optimized Tree Model Instantiations ---
         xgb_clf = xgb.XGBClassifier(
