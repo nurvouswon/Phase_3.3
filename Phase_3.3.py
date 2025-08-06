@@ -575,10 +575,11 @@ if event_file is not None and today_file is not None:
     # Deduplicate combined features too, just in case
     X_combined = dedup_columns(X_combined)
 
-    st.write("📈 Fitting logistic regression to rank combined features...")
-    lr = LogisticRegression(max_iter=1000, solver='liblinear')
-    lr.fit(X_combined, y)
-    coefs = pd.Series(np.abs(lr.coef_[0]), index=X_combined.columns)
+    st.write("📈 Fitting XGBoost to rank combined features...")
+    xgb = XGBClassifier(n_estimators=100, random_state=42, n_jobs=-1, use_label_encoder=False, eval_metric='logloss')
+    xgb.fit(X_combined, y)
+
+    coefs = pd.Series(xgb.feature_importances_, index=X_combined.columns)
 
     # Deduplicate coefficients index just in case
     coefs = coefs.loc[~coefs.index.duplicated()]
@@ -658,7 +659,7 @@ if event_file is not None and today_file is not None:
     st.write(f"✅ Final training data: {X_train.shape[0]} rows, {X_train.shape[1]} features")
 
     # ---- KFold Setup ----
-    n_splits = 7
+    n_splits = 2
     n_repeats = 1
     st.write(f"Preparing KFold splits: X {X_train.shape}, y {y_train.shape}, X_today {X_today_selected.shape}")
 
