@@ -1,1 +1,14 @@
-
+streamlit
+pandas
+numpy
+scikit-learn
+xgboost
+lightgbm
+catboost
+matplotlib
+betacal
+pyarrow
+polars
+fastparquet
+shap
+psutil
