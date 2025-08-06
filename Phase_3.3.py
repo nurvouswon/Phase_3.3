@@ -620,11 +620,11 @@ if event_file is not None and today_file is not None:
     OOS_ROWS = min(2000, len(X) // 4)  # Dynamic OOS size based on dataset
     if len(X) <= OOS_ROWS:
         st.warning(f"Dataset too small for OOS test. Using all {len(X)} rows for training.")
-        X_train_selected = X.copy()
+        X_train_selected = X_selected.copy()
         y_train_selected = y.copy()
     else:
-        X_train_selected = X.iloc[:-OOS_ROWS].copy()
-        y_train_selected = y.iloc[:-OOS_ROWS].copy()
+        X_train_selected = X_selected.copy()
+        y_train_selected = y.copy()
 
     # ===== Sampling for Streamlit Cloud =====
     max_rows = 15000
