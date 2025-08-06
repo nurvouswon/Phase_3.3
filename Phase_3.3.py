@@ -583,7 +583,7 @@ if event_file is not None and today_file is not None:
     # Deduplicate coefficients index just in case
     coefs = coefs.loc[~coefs.index.duplicated()]
 
-    top_combined_features = coefs.sort_values(ascending=False).head(200).index.tolist()
+    top_combined_features = coefs.sort_values(ascending=False).head(200).index.tolist()  # <-- 200 here!
     st.write("🏁 Top combined features selected:", top_combined_features)
 
     # --- Final output ---
@@ -593,7 +593,9 @@ if event_file is not None and today_file is not None:
 
     # Align X_today to match columns and fill safely
     common_cols = X_selected.columns.intersection(X_today.columns)
-    X_today_selected = X_today[X_selected.columns].copy()  # Limit X_today_selected to top 200 features
+    X_today_selected = X_today[common_cols].copy()
+
+    # Reindex to ensure order matches X_selected, fill missing columns with -1
     X_today_selected = X_today_selected.reindex(columns=X_selected.columns, fill_value=-1)
 
     # Deduplicate final X_today_selected columns just in case
@@ -613,54 +615,70 @@ if event_file is not None and today_file is not None:
 
     # Final output confirmation
     st.write(f"✅ Final selected feature shape: {X_selected.shape}")
+    st.write("🎯 Feature engineering and selection complete.")
+
+    # --- Output preview ---
+    st.write("📋 Preview of today's selected features:")
+    st.dataframe(X_today_selected)
 
     # ========== OOS TEST =============
-    OOS_ROWS = min(2000, len(X) // 4)  # Dynamic OOS size based on dataset
-    if len(X) <= OOS_ROWS:
-        st.warning(f"Dataset too small for OOS test. Using all {len(X)} rows for training.")
-        X_train_selected = X_selected.copy()
-        y_train_selected = y.copy()
+    OOS_ROWS = min(2000, len(X_selected) // 4)  # Use X_selected length here
+
+    if len(X_selected) <= OOS_ROWS:
+        st.warning(f"Dataset too small for OOS test. Using all {len(X_selected)} rows for training.")
+        X_train = X_selected.copy()
+        y_train = y.copy()
+        X_oos = pd.DataFrame()
+        y_oos = pd.Series()
     else:
-        X_train_selected = X_selected.copy()
-        y_train_selected = y.copy()
+        X_train = X_selected.iloc[:-OOS_ROWS].copy()
+        y_train = y.iloc[:-OOS_ROWS].copy()
+        X_oos = X_selected.iloc[-OOS_ROWS:].copy()
+        y_oos = y.iloc[-OOS_ROWS:].copy()
 
     # ===== Sampling for Streamlit Cloud =====
     max_rows = 15000
 
     # Add defensive checks
-    if X_train_selected.shape[0] > max_rows:
-        st.warning(f"Training limited to {max_rows} rows for memory (full dataset was {X_train_selected.shape[0]} rows).")
-        X_train_selected = X_train_selected.iloc[:max_rows].copy()
-        y_train_selected = y_train_selected.iloc[:max_rows].copy()
+    if 'X_train' not in locals() or X_train.empty:
+        st.error("CRITICAL: X_train not properly initialized. Using selected features as fallback.")
+        X_train = X_selected.copy()
+        y_train = y.copy()
+    
+    if X_train.shape[0] > max_rows:
+        st.warning(f"Training limited to {max_rows} rows for memory (full dataset was {X_train.shape[0]} rows).")
+        X_train = X_train.iloc[:max_rows].copy()
+        y_train = y_train.iloc[:max_rows].copy()
 
     # Final validation
-    if X_train_selected.empty or y_train_selected.empty:
+    if X_train.empty or y_train.empty:
         st.error("FATAL: No training data available after sampling. Check your input data.")
         st.stop()
 
-    st.write(f"✅ Final training data: {X_train_selected.shape[0]} rows, {X_train_selected.shape[1]} features")
+    st.write(f"✅ Final training data: {X_train.shape[0]} rows, {X_train.shape[1]} features")
 
     # ---- KFold Setup ----
     n_splits = 2
     n_repeats = 1
-    st.write(f"Preparing KFold splits: X {X_train_selected.shape}, y {y_train_selected.shape}, X_today {X_today.shape}")
+    st.write(f"Preparing KFold splits: X {X_train.shape}, y {y_train.shape}, X_today {X_today_selected.shape}")
 
     rskf = RepeatedStratifiedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=42)
 
-    val_fold_probas = np.zeros((len(y_train_selected), 8))
-    test_fold_probas = np.zeros((X_today.shape[0], 8))
+    val_fold_probas = np.zeros((len(y_train), 8))
+    test_fold_probas = np.zeros((X_today_selected.shape[0], 8))
     scaler = StandardScaler()
     fold_times = []
     show_shap = st.checkbox("Show SHAP Feature Importance (slow, only for small datasets)", value=False)
 
-    for fold, (tr_idx, va_idx) in enumerate(rskf.split(X_train_selected, y_train_selected)):
+    for fold, (tr_idx, va_idx) in enumerate(rskf.split(X_train, y_train)):
         t_fold_start = time.time()
-        X_tr, X_va = X_train_selected.iloc[tr_idx], X_train_selected.iloc[va_idx]
-        y_tr, y_va = y_train_selected.iloc[tr_idx], y_train_selected.iloc[va_idx]
+        X_tr, X_va = X_train.iloc[tr_idx], X_train.iloc[va_idx]
+        y_tr, y_va = y_train.iloc[tr_idx], y_train.iloc[va_idx]
         sc = scaler.fit(X_tr)
         X_tr_scaled = sc.transform(X_tr)
         X_va_scaled = sc.transform(X_va)
-
+        X_today_scaled = sc.transform(X_today_selected)
+        # ... continue training & prediction ...
         # --- Optimized Tree Model Instantiations ---
         xgb_clf = xgb.XGBClassifier(
             n_estimators=150,
