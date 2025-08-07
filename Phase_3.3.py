@@ -598,7 +598,7 @@ if event_file is not None and today_file is not None:
     # Deduplicate coefficients index just in case
     coefs = coefs.loc[~coefs.index.duplicated()]
 
-    top_combined_features = coefs.sort_values(ascending=False).head(200).index.tolist()
+    top_combined_features = coefs.sort_values(ascending=False).head(300).index.tolist()
     st.write("🏁 Top combined features selected:", top_combined_features)
 
     # --- Final output ---
