@@ -107,242 +107,225 @@ def feature_debug(X):
 
     st.write("Missing values per column (top 10):", X.isna().sum().sort_values(ascending=False).head(10))
 
-def overlay_multiplier(row):
-    """
-    Upgraded overlay multiplier using:
-    - Batted ball pull/oppo/fb/gb/air for both batter and pitcher.
-    - Full wind direction parsing.
-    - Handedness logic.
-    - Amplified, but reasonable, effects for correct context.
-    - Consolidated and enhanced weather weighting.
-    - Added power hitter composite score with weather synergy.
-    """
-    # Constants for clamping
-    EDGE_MIN = 0.70
-    EDGE_MAX = 1.36
-
-    edge = 1.0
-
-    # --- Get relevant values safely ---
-    wind = row.get("wind_mph", np.nan)
-    wind_dir = str(row.get("wind_dir_string", "")).lower().strip()
-    temp = row.get("temp", np.nan)
-    humidity = row.get("humidity", np.nan)
-    park_hr_col = 'park_hr_rate'
-
-    # Batter stats
-    b_hand = str(row.get('stand', row.get('batter_hand', 'R'))).upper() or "R"
-    b_pull = row.get("pull_rate", np.nan)
-    b_oppo = row.get("oppo_rate", np.nan)
-    b_fb = row.get("fb_rate", np.nan)
-    b_air = row.get("air_rate", np.nan)
-    b_ld = row.get("ld_rate", np.nan)
-    b_pu = row.get("pu_rate", np.nan)
-    b_hot = row.get("b_hr_per_pa_7", np.nan)  # rolling HR/PA
-
-    # Pitcher stats
-    p_hand = str(row.get("pitcher_hand", "")).upper() or "R"
-    p_fb = row.get("p_fb_rate", row.get("fb_rate", np.nan))
-    p_gb = row.get("p_gb_rate", row.get("gb_rate", np.nan))
-    p_air = row.get("p_air_rate", row.get("air_rate", np.nan))
-    p_ld = row.get("p_ld_rate", row.get("ld_rate", np.nan))
-    p_pu = row.get("p_pu_rate", row.get("pu_rate", np.nan))
-
-    # --- Wind logic ---
-    wind_factor = 1.0
-    if wind is not None and pd.notnull(wind) and wind >= 7 and wind_dir and wind_dir != "nan":
-        # Boost/fade by wind direction and batter spray tendencies
-        for field, out_bonus, in_bonus, field_side in [
-            ("rf", 1.19, 0.85, ("R", "oppo")),  # RHH oppo or LHH pull to RF
-            ("lf", 1.19, 0.85, ("R", "pull")),  # RHH pull or LHH oppo to LF
-            ("cf", 1.11, 0.90, ("ANY", "fb")),  # Any FB to CF
-        ]:
-            if field in wind_dir:
-                if "out" in wind_dir or "o" in wind_dir:
-                    if field == "rf":
-                        if (b_hand == "R" and pd.notnull(b_oppo) and b_oppo > 0.26) or (b_hand == "L" and pd.notnull(b_pull) and b_pull > 0.35):
-                            wind_factor *= out_bonus
-                    elif field == "lf":
-                        if (b_hand == "R" and pd.notnull(b_pull) and b_pull > 0.35) or (b_hand == "L" and pd.notnull(b_oppo) and b_oppo > 0.26):
-                            wind_factor *= out_bonus
-                    elif field == "cf":
-                        if (pd.notnull(b_fb) and b_fb > 0.21) or (pd.notnull(b_air) and b_air > 0.34):
-                            wind_factor *= out_bonus
-                if "in" in wind_dir or "i" in wind_dir:
-                    if field == "rf":
-                        if (b_hand == "R" and pd.notnull(b_oppo) and b_oppo > 0.26) or (b_hand == "L" and pd.notnull(b_pull) and b_pull > 0.35):
-                            wind_factor *= in_bonus
-                    elif field == "lf":
-                        if (b_hand == "R" and pd.notnull(b_pull) and b_pull > 0.35) or (b_hand == "L" and pd.notnull(b_oppo) and b_oppo > 0.26):
-                            wind_factor *= in_bonus
-                    elif field == "cf":
-                        if (pd.notnull(b_fb) and b_fb > 0.21) or (pd.notnull(b_air) and b_air > 0.34):
-                            wind_factor *= in_bonus
-
-        # Extra boost/fade for high-flyball pitcher and hitter combo
-        if pd.notnull(p_fb) and p_fb > 0.25 and ((pd.notnull(b_fb) and b_fb > 0.23) or (pd.notnull(b_air) and b_air > 0.36)):
-            if "out" in wind_dir or "o" in wind_dir:
-                wind_factor *= 1.09
-            elif "in" in wind_dir or "i" in wind_dir:
-                wind_factor *= 0.94
-
-        # Fade for extreme groundball pitchers
-        if pd.notnull(p_gb) and p_gb > 0.53:
-            wind_factor *= 0.93
-
-    # --- Hot streak logic (recent HR/PA) ---
-    if pd.notnull(b_hot):
-        if b_hot > 0.09:
-            edge *= 1.04
-        elif b_hot < 0.025:
-            edge *= 0.97
-
-    # --- Weather logic: consolidated and balanced ---
-    if temp is not None and pd.notnull(temp):
-        # Apply exponential scale relative to 70°F baseline
-        edge *= 1.035 ** ((temp - 70) / 10)
-    if humidity is not None and pd.notnull(humidity):
-        if humidity > 65:
-            edge *= 1.02
-        elif humidity < 35:
-            edge *= 0.98
-
-    # --- Park HR Rate logic ---
-    if park_hr_col in row and pd.notnull(row[park_hr_col]):
-        # Clamp to reasonable range
-        pf = max(0.80, min(1.22, float(row[park_hr_col])))
-        edge *= pf
-
-    # --- Power hitter composite score function ---
-    def power_hitter_score(row):
-        metrics = {
-            "b_hr_per_pa_7": row.get("b_hr_per_pa_7", np.nan),
-            "barrel_rate": row.get("barrel_rate", np.nan),
-            "hard_hit_rate": row.get("hard_hit_rate", np.nan),
-            "fb_rate": row.get("fb_rate", np.nan),
-            "launch_angle": row.get("launch_angle", np.nan),
-            "exit_velocity": row.get("exit_velocity", np.nan),
-        }
-        weights = {
-            "b_hr_per_pa_7": 0.4,
-            "barrel_rate": 0.3,
-            "hard_hit_rate": 0.2,
-            "fb_rate": 0.05,
-            "launch_angle": 0.025,
-            "exit_velocity": 0.025,
-        }
-        score = 0.0
-        total_weight = 0.0
-        for key, weight in weights.items():
-            val = metrics.get(key, np.nan)
-            if pd.notnull(val):
-                norm_val = val
-                if key == "b_hr_per_pa_7":
-                    norm_val = min(val / 0.1, 1)
-                elif key == "launch_angle":
-                    diff = abs(val - 30)
-                    norm_val = max(0, 1 - diff / 20)
-                elif key == "exit_velocity":
-                    norm_val = (val - 70) / (115 - 70)
-                    norm_val = max(0, min(norm_val, 1))
-                else:
-                    norm_val = max(0, min(val, 1))
-                score += norm_val * weight
-                total_weight += weight
-        if total_weight > 0:
-            return score / total_weight
-        else:
-            return 0.0
-
-    # --- Calculate power hitter score ---
-    power_score = power_hitter_score(row)
-
-    # --- Calculate synergy multiplier for power hitter & favorable weather ---
-    temp_factor = 1.0
-    if pd.notnull(temp):
-        temp_factor = 1.035 ** ((temp - 70) / 10)
-    wind_out_factor = 1.0
-    if pd.notnull(wind) and wind >= 7 and ("out" in wind_dir or "o" in wind_dir):
-        wind_out_factor = 1.10
-
-    synergy_factor = 1 + (power_score * 0.15 * temp_factor * wind_out_factor)
-
-    edge *= synergy_factor
-
-    # --- Multiply wind factor after all else ---
-    edge *= wind_factor
-
-    # --- Clamp final edge value for sanity ---
-    edge = np.clip(edge, EDGE_MIN, EDGE_MAX)
-
+def overlay_multiplier(row):    
+    """    
+    Upgraded overlay multiplier using:    
+    - Batted ball pull/oppo/fb/gb/air for both batter and pitcher.    
+    - Full wind direction parsing.    
+    - Handedness logic.    
+    - Amplified, but reasonable, effects for correct context.    
+    - Consolidated and enhanced weather weighting including temp-wind synergy.    
+    - Added advanced power hitter metrics: Barrel%, Hard-hit%, EV, launch angle, spray angle, Bayesian true talent.    
+    """    
+    
+    EDGE_MIN = 0.70    
+    EDGE_MAX = 1.36    
+    
+    edge = 1.0    
+    
+    # --- Get relevant values safely ---    
+    wind = row.get("wind_mph", np.nan)    
+    wind_dir = str(row.get("wind_dir_string", "")).lower().strip()    
+    temp = row.get("temp", np.nan)    
+    humidity = row.get("humidity", np.nan)    
+    park_hr_col = 'park_hr_rate'    
+    
+    # Batter stats    
+    b_hand = str(row.get('stand', row.get('batter_hand', 'R'))).upper() or "R"    
+    b_pull = row.get("pull_rate", np.nan)    
+    b_oppo = row.get("oppo_rate", np.nan)    
+    b_fb = row.get("fb_rate", np.nan)    
+    b_air = row.get("air_rate", np.nan)    
+    b_ld = row.get("ld_rate", np.nan)    
+    b_pu = row.get("pu_rate", np.nan)    
+    b_hot = row.get("b_hr_per_pa_7", np.nan)  # rolling HR/PA    
+    
+    # --- Advanced power hitter metrics ---    
+    b_barrel = row.get("barrel_pct_14d", np.nan)    
+    b_hardhit = row.get("hardhit_pct_14d", np.nan)    
+    b_ev_90 = row.get("ev_90pct_14d", np.nan)    
+    b_la_mean = row.get("launch_angle_mean_14d", np.nan)    
+    b_la_var = row.get("launch_angle_var_14d", np.nan)    
+    b_spray_angle_mean = row.get("spray_angle_mean", np.nan)    
+    b_spray_angle_var = row.get("spray_angle_var", np.nan)    
+    b_true_talent = row.get("b_power_true_talent", 1.0)  # Bayesian adjusted power metric    
+    
+    # Pitcher stats    
+    p_hand = str(row.get("pitcher_hand", "")).upper() or "R"    
+    p_fb = row.get("p_fb_rate", row.get("fb_rate", np.nan))    
+    p_gb = row.get("p_gb_rate", row.get("gb_rate", np.nan))    
+    p_air = row.get("p_air_rate", row.get("air_rate", np.nan))    
+    p_ld = row.get("p_ld_rate", row.get("ld_rate", np.nan))    
+    p_pu = row.get("p_pu_rate", row.get("pu_rate", np.nan))    
+    
+    # --- Calculate power multiplier from advanced power metrics ---    
+    power_mult = 1.0    
+    if pd.notnull(b_barrel):    
+        power_mult *= 1 + (b_barrel - 0.05) * 4  # barrel% baseline ~5%    
+    if pd.notnull(b_hardhit):    
+        power_mult *= 1 + (b_hardhit - 0.35) * 1.5  # hard hit baseline ~35%    
+    if pd.notnull(b_ev_90):    
+        power_mult *= 1 + max(0, (b_ev_90 - 105)) * 0.015  # EV effect past 105 mph    
+    if pd.notnull(b_la_var):    
+        # Less launch angle variance is better for HR    
+        if b_la_var < 20:    
+            power_mult *= 1.03    
+        elif b_la_var > 50:    
+            power_mult *= 0.97    
+    power_mult *= b_true_talent  # Bayesian adjustment    
+    power_mult = np.clip(power_mult, 0.8, 1.5)    
+    
+    # Apply power multiplier to edge    
+    edge *= power_mult    
+    
+    # --- Wind logic ---    
+    wind_factor = 1.0    
+    if wind is not None and pd.notnull(wind) and wind >= 7 and wind_dir and wind_dir != "nan":    
+        for field, out_bonus, in_bonus, field_side in [    
+            ("rf", 1.19, 0.85, ("R", "oppo")),    
+            ("lf", 1.19, 0.85, ("R", "pull")),    
+            ("cf", 1.11, 0.90, ("ANY", "fb")),    
+        ]:    
+            if field in wind_dir:    
+                if "out" in wind_dir or "o" in wind_dir:    
+                    if field == "rf":    
+                        if (b_hand == "R" and pd.notnull(b_oppo) and b_oppo > 0.26) or (b_hand == "L" and pd.notnull(b_pull) and b_pull > 0.35):    
+                            wind_factor *= out_bonus    
+                    elif field == "lf":    
+                        if (b_hand == "R" and pd.notnull(b_pull) and b_pull > 0.35) or (b_hand == "L" and pd.notnull(b_oppo) and b_oppo > 0.26):    
+                            wind_factor *= out_bonus    
+                    elif field == "cf":    
+                        if (pd.notnull(b_fb) and b_fb > 0.21) or (pd.notnull(b_air) and b_air > 0.34):    
+                            wind_factor *= out_bonus    
+                if "in" in wind_dir or "i" in wind_dir:    
+                    if field == "rf":    
+                        if (b_hand == "R" and pd.notnull(b_oppo) and b_oppo > 0.26) or (b_hand == "L" and pd.notnull(b_pull) and b_pull > 0.35):    
+                            wind_factor *= in_bonus    
+                    elif field == "lf":    
+                        if (b_hand == "R" and pd.notnull(b_pull) and b_pull > 0.35) or (b_hand == "L" and pd.notnull(b_oppo) and b_oppo > 0.26):    
+                            wind_factor *= in_bonus    
+                    elif field == "cf":    
+                        if (pd.notnull(b_fb) and b_fb > 0.21) or (pd.notnull(b_air) and b_air > 0.34):    
+                            wind_factor *= in_bonus    
+    
+        # High flyball pitcher/hitter combo    
+        if pd.notnull(p_fb) and p_fb > 0.25 and ((pd.notnull(b_fb) and b_fb > 0.23) or (pd.notnull(b_air) and b_air > 0.36)):    
+            if "out" in wind_dir or "o" in wind_dir:    
+                wind_factor *= 1.09    
+            elif "in" in wind_dir or "i" in wind_dir:    
+                wind_factor *= 0.94    
+    
+        # Groundball pitcher fade    
+        if pd.notnull(p_gb) and p_gb > 0.53:    
+            wind_factor *= 0.93    
+    
+    # --- Hot streak logic (recent HR/PA) ---    
+    if pd.notnull(b_hot):    
+        if b_hot > 0.09:    
+            edge *= 1.04    
+        elif b_hot < 0.025:    
+            edge *= 0.97    
+    
+    # --- Weather logic: consolidated and balanced ---    
+    if temp is not None and pd.notnull(temp):    
+        edge *= 1.035 ** ((temp - 70) / 10)    
+    if humidity is not None and pd.notnull(humidity):    
+        if humidity > 65:    
+            edge *= 1.02    
+        elif humidity < 35:    
+            edge *= 0.98    
+    
+    # --- Park HR Rate logic ---    
+    if park_hr_col in row and pd.notnull(row[park_hr_col]):    
+        pf = max(0.80, min(1.22, float(row[park_hr_col])))    
+        edge *= pf    
+    
+    # --- Multiply wind factor ---    
+    edge *= wind_factor    
+    
+    # --- Add Temperature + Wind Synergy (numeric) ---    
+    synergy_score = 1.0    
+    if pd.notnull(temp) and pd.notnull(wind):    
+        if temp >= 75 and wind >= 7 and ("out" in wind_dir or "o" in wind_dir):    
+            synergy_score = 1.05  # 5% boost    
+        elif temp >= 65 and wind >= 5:    
+            synergy_score = 1.02  # 2% boost    
+        else:    
+            synergy_score = 0.98  # slight fade    
+    
+    edge *= synergy_score    
+    
+    # --- Clamp final edge for sanity ---    
+    edge = np.clip(edge, EDGE_MIN, EDGE_MAX)    
+    
     return float(edge)
-  
-def rate_weather(row):  
-    ratings = {}  
-  
-    # Temperature rating  
-    temp = row.get("temp", np.nan)  
-    if pd.isna(temp):  
-        ratings["temp_rating"] = "?"  
-    elif 68 <= temp <= 85:  
-        ratings["temp_rating"] = "Excellent"  
-    elif 60 <= temp < 68 or 85 < temp <= 92:  
-        ratings["temp_rating"] = "Good"  
-    elif 50 <= temp < 60 or 92 < temp <= 98:  
-        ratings["temp_rating"] = "Fair"  
-    else:  
-        ratings["temp_rating"] = "Poor"  
-  
-    # Humidity rating  
-    humidity = row.get("humidity", np.nan)  
-    if pd.isna(humidity):  
-        ratings["humidity_rating"] = "?"  
-    elif 45 <= humidity <= 65:  
-        ratings["humidity_rating"] = "Excellent"  
-    elif 30 <= humidity < 45 or 65 < humidity <= 80:  
-        ratings["humidity_rating"] = "Good"  
-    elif 15 <= humidity < 30 or 80 < humidity <= 90:  
-        ratings["humidity_rating"] = "Fair"  
-    else:  
-        ratings["humidity_rating"] = "Poor"  
-  
-    # Wind rating  
-    wind = row.get("wind_mph", np.nan)  
-    wind_dir = str(row.get("wind_dir_string", "")).lower()  
-    if pd.isna(wind):  
-        ratings["wind_rating"] = "?"  
-    elif wind < 6:  
-        ratings["wind_rating"] = "Excellent"  
-    elif 6 <= wind < 12:  
-        ratings["wind_rating"] = "Good"  
-    elif 12 <= wind < 18:  
-        if "out" in wind_dir:  
-            ratings["wind_rating"] = "Good"  
-        elif "in" in wind_dir:  
-            ratings["wind_rating"] = "Fair"  
-        else:  
-            ratings["wind_rating"] = "Fair"  
-    else:  # wind >= 18  
-        if "out" in wind_dir:  
-            ratings["wind_rating"] = "Fair"  
-        elif "in" in wind_dir:  
-            ratings["wind_rating"] = "Poor"  
-        else:  
-            ratings["wind_rating"] = "Poor"  
-  
-    # Condition rating  
-    condition = str(row.get("condition", "")).lower()  
-    if not condition or condition in ("unknown", "none", "na"):  
-        ratings["condition_rating"] = "?"  
-    elif "clear" in condition or "sun" in condition or "outdoor" in condition:  
-        ratings["condition_rating"] = "Excellent"  
-    elif "cloud" in condition or "partly" in condition:  
-        ratings["condition_rating"] = "Good"  
-    elif "rain" in condition or "fog" in condition:  
-        ratings["condition_rating"] = "Poor"  
-    else:  
-        ratings["condition_rating"] = "Fair"  
-  
+
+def rate_weather(row):    
+    ratings = {}    
+    
+    # Temperature rating    
+    temp = row.get("temp", np.nan)    
+    if pd.isna(temp):    
+        ratings["temp_rating"] = "?"    
+    elif 68 <= temp <= 85:    
+        ratings["temp_rating"] = "Excellent"    
+    elif 60 <= temp < 68 or 85 < temp <= 92:    
+        ratings["temp_rating"] = "Good"    
+    elif 50 <= temp < 60 or 92 < temp <= 98:    
+        ratings["temp_rating"] = "Fair"    
+    else:    
+        ratings["temp_rating"] = "Poor"    
+    
+    # Humidity rating    
+    humidity = row.get("humidity", np.nan)    
+    if pd.isna(humidity):    
+        ratings["humidity_rating"] = "?"    
+    elif 45 <= humidity <= 65:    
+        ratings["humidity_rating"] = "Excellent"    
+    elif 30 <= humidity < 45 or 65 < humidity <= 80:    
+        ratings["humidity_rating"] = "Good"    
+    elif 15 <= humidity < 30 or 80 < humidity <= 90:    
+        ratings["humidity_rating"] = "Fair"    
+    else:    
+        ratings["humidity_rating"] = "Poor"    
+    
+    # Wind rating    
+    wind = row.get("wind_mph", np.nan)    
+    wind_dir = str(row.get("wind_dir_string", "")).lower()    
+    if pd.isna(wind):    
+        ratings["wind_rating"] = "?"    
+    elif wind < 6:    
+        ratings["wind_rating"] = "Excellent"    
+    elif 6 <= wind < 12:    
+        ratings["wind_rating"] = "Good"    
+    elif 12 <= wind < 18:    
+        if "out" in wind_dir:    
+            ratings["wind_rating"] = "Good"    
+        elif "in" in wind_dir:    
+            ratings["wind_rating"] = "Fair"    
+        else:    
+            ratings["wind_rating"] = "Fair"    
+    else:  # wind >= 18    
+        if "out" in wind_dir:    
+            ratings["wind_rating"] = "Fair"    
+        elif "in" in wind_dir:    
+            ratings["wind_rating"] = "Poor"    
+        else:    
+            ratings["wind_rating"] = "Poor"    
+    
+    # Condition rating    
+    condition = str(row.get("condition", "")).lower()    
+    if not condition or condition in ("unknown", "none", "na"):    
+        ratings["condition_rating"] = "?"    
+    elif "clear" in condition or "sun" in condition or "outdoor" in condition:    
+        ratings["condition_rating"] = "Excellent"    
+    elif "cloud" in condition or "partly" in condition:    
+        ratings["condition_rating"] = "Good"    
+    elif "rain" in condition or "fog" in condition:    
+        ratings["condition_rating"] = "Poor"    
+    else:    
+        ratings["condition_rating"] = "Fair"    
+    
     return pd.Series(ratings)
 
 def drift_check(train, today, n=5):
@@ -542,7 +525,7 @@ if event_file is not None and today_file is not None:
     # Deduplicate base_importances index if needed (usually not required here, but for safety)
     base_importances = base_importances.loc[~base_importances.index.duplicated()]
 
-    top_base_features = base_importances.sort_values(ascending=False).head(40).index.tolist()
+    top_base_features = base_importances.sort_values(ascending=False).head(30).index.tolist()
     st.write("🏆 Top base features selected:", top_base_features)
 
     # --- Step 2: Generate cross-features using interactions ---
@@ -615,7 +598,7 @@ if event_file is not None and today_file is not None:
     # Deduplicate coefficients index just in case
     coefs = coefs.loc[~coefs.index.duplicated()]
 
-    top_combined_features = coefs.sort_values(ascending=False).head(225).index.tolist()
+    top_combined_features = coefs.sort_values(ascending=False).head(250).index.tolist()
     st.write("🏁 Top combined features selected:", top_combined_features)
 
     # --- Final output ---
