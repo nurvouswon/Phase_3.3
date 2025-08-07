@@ -106,6 +106,7 @@ def feature_debug(X):
             st.write(f"⚠️ Could not inspect column `{col}`: {e}")
 
     st.write("Missing values per column (top 10):", X.isna().sum().sort_values(ascending=False).head(10))
+
 def overlay_multiplier(row):
     """
     Upgraded overlay multiplier using:
@@ -114,7 +115,14 @@ def overlay_multiplier(row):
     - Handedness logic.
     - Amplified, but reasonable, effects for correct context.
     """
+
     edge = 1.0
+
+    # Helper function to apply wind bonuses safely
+    def apply_wind_bonus(factor, cond):
+        nonlocal edge
+        if cond:
+            edge *= factor
 
     # --- Get relevant values safely ---
     wind = row.get("wind_mph", np.nan)
@@ -123,7 +131,7 @@ def overlay_multiplier(row):
     humidity = row.get("humidity", np.nan)
     park_hr_col = 'park_hr_rate'
 
-    # Batter
+    # Batter metrics
     b_hand = str(row.get('stand', row.get('batter_hand', 'R'))).upper() or "R"
     b_pull = row.get("pull_rate", np.nan)
     b_oppo = row.get("oppo_rate", np.nan)
@@ -131,9 +139,9 @@ def overlay_multiplier(row):
     b_air = row.get("air_rate", np.nan)
     b_ld = row.get("ld_rate", np.nan)
     b_pu = row.get("pu_rate", np.nan)
-    b_hot = row.get("b_hr_per_pa_7", np.nan)  # rolling HR/PA
-    
-    # Pitcher
+    b_hot = row.get("b_hr_per_pa_7", np.nan)  # rolling HR per PA (7 days)
+
+    # Pitcher metrics
     p_hand = str(row.get("pitcher_hand", "")).upper() or "R"
     p_fb = row.get("p_fb_rate", row.get("fb_rate", np.nan))
     p_gb = row.get("p_gb_rate", row.get("gb_rate", np.nan))
@@ -141,123 +149,114 @@ def overlay_multiplier(row):
     p_ld = row.get("p_ld_rate", row.get("ld_rate", np.nan))
     p_pu = row.get("p_pu_rate", row.get("pu_rate", np.nan))
 
-    # --- Wind logic: Amplified/Smart ---
+    # --- Wind factor logic ---
     wind_factor = 1.0
-    if wind is not None and pd.notnull(wind) and wind >= 7 and wind_dir and wind_dir != "nan":
-        # Strong outfield wind: boost for right context
+    if pd.notnull(wind) and wind >= 7 and wind_dir and wind_dir != "nan":
+        # Evaluate directional wind bonuses
         for field, out_bonus, in_bonus, field_side in [
-            ("rf", 1.19, 0.85, ("R", "oppo")),  # RHH oppo or LHH pull to RF
-            ("lf", 1.19, 0.85, ("R", "pull")),  # RHH pull or LHH oppo to LF
-            ("cf", 1.11, 0.90, ("ANY", "fb")),  # Any FB to CF
+            ("rf", 1.19, 0.85, ("R", "oppo")),  # RF wind effects
+            ("lf", 1.19, 0.85, ("R", "pull")),  # LF wind effects
+            ("cf", 1.11, 0.90, ("ANY", "fb")),  # CF wind effects
         ]:
             if field in wind_dir:
                 if "out" in wind_dir or "o" in wind_dir:
                     if field == "rf":
-                        if (b_hand == "R" and b_oppo > 0.26) or (b_hand == "L" and b_pull > 0.35):
+                        if (b_hand == "R" and pd.notnull(b_oppo) and b_oppo > 0.26) or (b_hand == "L" and pd.notnull(b_pull) and b_pull > 0.35):
                             wind_factor *= out_bonus
                     elif field == "lf":
-                        if (b_hand == "R" and b_pull > 0.35) or (b_hand == "L" and b_oppo > 0.26):
+                        if (b_hand == "R" and pd.notnull(b_pull) and b_pull > 0.35) or (b_hand == "L" and pd.notnull(b_oppo) and b_oppo > 0.26):
                             wind_factor *= out_bonus
                     elif field == "cf":
-                        if b_fb > 0.21 or b_air > 0.34:
+                        if (pd.notnull(b_fb) and b_fb > 0.21) or (pd.notnull(b_air) and b_air > 0.34):
                             wind_factor *= out_bonus
-                if "in" in wind_dir or "i" in wind_dir:
+                elif "in" in wind_dir or "i" in wind_dir:
                     if field == "rf":
-                        if (b_hand == "R" and b_oppo > 0.26) or (b_hand == "L" and b_pull > 0.35):
+                        if (b_hand == "R" and pd.notnull(b_oppo) and b_oppo > 0.26) or (b_hand == "L" and pd.notnull(b_pull) and b_pull > 0.35):
                             wind_factor *= in_bonus
                     elif field == "lf":
-                        if (b_hand == "R" and b_pull > 0.35) or (b_hand == "L" and b_oppo > 0.26):
+                        if (b_hand == "R" and pd.notnull(b_pull) and b_pull > 0.35) or (b_hand == "L" and pd.notnull(b_oppo) and b_oppo > 0.26):
                             wind_factor *= in_bonus
                     elif field == "cf":
-                        if b_fb > 0.21 or b_air > 0.34:
+                        if (pd.notnull(b_fb) and b_fb > 0.21) or (pd.notnull(b_air) and b_air > 0.34):
                             wind_factor *= in_bonus
 
-        # Add extra boost/fade for high-flyball hitters facing high-flyball pitchers
-        if p_fb is not np.nan and p_fb > 0.25 and (b_fb > 0.23 or b_air > 0.36):
+        # Extra boost/fade for high flyball pitchers vs hitters
+        if pd.notnull(p_fb) and p_fb > 0.25 and ((pd.notnull(b_fb) and b_fb > 0.23) or (pd.notnull(b_air) and b_air > 0.36)):
             if "out" in wind_dir or "o" in wind_dir:
                 wind_factor *= 1.09
             elif "in" in wind_dir or "i" in wind_dir:
                 wind_factor *= 0.94
+
         # Fade for extreme groundball pitchers
-        if p_gb is not np.nan and p_gb > 0.53:
+        if pd.notnull(p_gb) and p_gb > 0.53:
             wind_factor *= 0.93
 
     # --- Hot streak logic (recent HR/PA) ---
-    if b_hot is not np.nan and b_hot > 0.09:
-        edge *= 1.04
-    elif b_hot is not np.nan and b_hot < 0.025:
-        edge *= 0.97
+    if pd.notnull(b_hot):
+        if b_hot > 0.09:
+            edge *= 1.04
+        elif b_hot < 0.025:
+            edge *= 0.97
 
-    # --- Weather logic ---
-    if temp is not None and pd.notnull(temp):
+    # --- Weather adjustments ---
+    if pd.notnull(temp):
         edge *= 1.036 ** ((temp - 70) / 10)
-    if humidity is not None and pd.notnull(humidity):
-        if humidity > 65: edge *= 1.02
-        elif humidity < 35: edge *= 0.98
+    if pd.notnull(humidity):
+        if humidity > 65:
+            edge *= 1.02
+        elif humidity < 35:
+            edge *= 0.98
 
-    # --- Park HR Rate logic ---
+    # --- Park HR Rate factor ---
     if park_hr_col in row and pd.notnull(row[park_hr_col]):
         pf = max(0.80, min(1.22, float(row[park_hr_col])))
         edge *= pf
 
-    # --- Multiply wind after everything else, so it can be "amplifying" ---
+    # --- Amplify edge by wind factor ---
     edge *= wind_factor
 
-    # --- Clamp for sanity ---
-    return float(np.clip(edge, 0.70, 1.36))
-    def apply_wind_bonus(factor, cond):
-        nonlocal edge
-        if cond:
-            edge *= factor
-
-    if wind >= 7 and isinstance(wind_dir, str) and wind_dir and wind_dir != "nan":
+    # --- Additional wind bonuses with helper ---
+    if pd.notnull(wind) and wind >= 7 and isinstance(wind_dir, str) and wind_dir and wind_dir != "nan":
         if "out" in wind_dir or "o" in wind_dir:
             if "rf" in wind_dir:
-                apply_wind_bonus(1.10, hand == "R" and b_oppo is not np.nan and b_oppo > 0.28)
-                apply_wind_bonus(1.13, hand == "L" and b_pull is not np.nan and b_pull > 0.37)
+                apply_wind_bonus(1.10, b_hand == "R" and pd.notnull(b_oppo) and b_oppo > 0.28)
+                apply_wind_bonus(1.13, b_hand == "L" and pd.notnull(b_pull) and b_pull > 0.37)
             if "lf" in wind_dir:
-                apply_wind_bonus(1.13, hand == "R" and b_pull is not np.nan and b_pull > 0.37)
-                apply_wind_bonus(1.10, hand == "L" and b_oppo is not np.nan and b_oppo > 0.28)
+                apply_wind_bonus(1.13, b_hand == "R" and pd.notnull(b_pull) and b_pull > 0.37)
+                apply_wind_bonus(1.10, b_hand == "L" and pd.notnull(b_oppo) and b_oppo > 0.28)
             if "cf" in wind_dir:
-                apply_wind_bonus(1.06, b_fb is not np.nan and b_fb > 0.22)
+                apply_wind_bonus(1.06, pd.notnull(b_fb) and b_fb > 0.22)
         elif "in" in wind_dir or "i" in wind_dir:
             if "rf" in wind_dir:
-                apply_wind_bonus(0.91, hand == "R" and b_oppo is not np.nan and b_oppo > 0.28)
-                apply_wind_bonus(0.88, hand == "L" and b_pull is not np.nan and b_pull > 0.37)
+                apply_wind_bonus(0.91, b_hand == "R" and pd.notnull(b_oppo) and b_oppo > 0.28)
+                apply_wind_bonus(0.88, b_hand == "L" and pd.notnull(b_pull) and b_pull > 0.37)
             if "lf" in wind_dir:
-                apply_wind_bonus(0.88, hand == "R" and b_pull is not np.nan and b_pull > 0.37)
-                apply_wind_bonus(0.91, hand == "L" and b_oppo is not np.nan and b_oppo > 0.28)
+                apply_wind_bonus(0.88, b_hand == "R" and pd.notnull(b_pull) and b_pull > 0.37)
+                apply_wind_bonus(0.91, b_hand == "L" and pd.notnull(b_oppo) and b_oppo > 0.28)
             if "cf" in wind_dir:
-                apply_wind_bonus(0.93, b_fb is not np.nan and b_fb > 0.22)
+                apply_wind_bonus(0.93, pd.notnull(b_fb) and b_fb > 0.22)
 
-        if p_fb is not np.nan and p_fb > 0.24:
+        if pd.notnull(p_fb) and p_fb > 0.24:
             if "out" in wind_dir or "o" in wind_dir:
                 edge *= 1.05
             elif "in" in wind_dir or "i" in wind_dir:
                 edge *= 0.97
-        if p_gb is not np.nan and p_gb > 0.49:
+        if pd.notnull(p_gb) and p_gb > 0.49:
             edge *= 0.97
 
-    temp = row.get("temp", np.nan)
-    if pd.notnull(temp):
-        edge *= 1.03 ** ((temp - 70) / 10)
+    # --- Clamp for sanity ---
+    return float(np.clip(edge, 0.70, 1.36))
 
-    humidity = row.get("humidity", np.nan)
-    if pd.notnull(humidity):
-        if humidity > 60:
-            edge *= 1.02
-        elif humidity < 40:
-            edge *= 0.98
-
-    park_hr_col = 'park_hr_rate'
-    if park_hr_col in row and pd.notnull(row[park_hr_col]):
-        pf = max(0.85, min(1.20, float(row[park_hr_col])))
-        edge *= pf
-
-    return float(np.clip(edge, 0.75, 1.33))
 
 def rate_weather(row):
+    """
+    Rate weather conditions for temperature, humidity, wind, and general condition.
+    Returns a pandas Series with ratings for each.
+    """
+
     ratings = {}
+
+    # Temperature rating
     temp = row.get("temp", np.nan)
     if pd.isna(temp):
         ratings["temp_rating"] = "?"
@@ -269,6 +268,8 @@ def rate_weather(row):
         ratings["temp_rating"] = "Fair"
     else:
         ratings["temp_rating"] = "Poor"
+
+    # Humidity rating
     humidity = row.get("humidity", np.nan)
     if pd.isna(humidity):
         ratings["humidity_rating"] = "?"
@@ -280,6 +281,8 @@ def rate_weather(row):
         ratings["humidity_rating"] = "Fair"
     else:
         ratings["humidity_rating"] = "Poor"
+
+    # Wind rating
     wind = row.get("wind_mph", np.nan)
     wind_dir = str(row.get("wind_dir_string", "")).lower()
     if pd.isna(wind):
@@ -302,6 +305,8 @@ def rate_weather(row):
             ratings["wind_rating"] = "Poor"
         else:
             ratings["wind_rating"] = "Poor"
+
+    # General condition rating (e.g., clear, cloudy, rain)
     condition = str(row.get("condition", "")).lower()
     if "clear" in condition or "sun" in condition or "outdoor" in condition:
         ratings["condition_rating"] = "Excellent"
@@ -311,6 +316,7 @@ def rate_weather(row):
         ratings["condition_rating"] = "Poor"
     else:
         ratings["condition_rating"] = "Fair"
+
     return pd.Series(ratings)
 
 def drift_check(train, today, n=5):
