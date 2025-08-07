@@ -525,7 +525,7 @@ if event_file is not None and today_file is not None:
     # Deduplicate base_importances index if needed (usually not required here, but for safety)
     base_importances = base_importances.loc[~base_importances.index.duplicated()]
 
-    top_base_features = base_importances.sort_values(ascending=False).head(50).index.tolist()
+    top_base_features = base_importances.sort_values(ascending=False).head(40).index.tolist()
     st.write("🏆 Top base features selected:", top_base_features)
 
     # --- Step 2: Generate cross-features using interactions ---
