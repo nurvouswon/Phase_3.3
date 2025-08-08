@@ -598,7 +598,7 @@ if event_file is not None and today_file is not None:
     # Deduplicate coefficients index just in case
     coefs = coefs.loc[~coefs.index.duplicated()]
 
-    top_combined_features = coefs.sort_values(ascending=False).head(250).index.tolist()
+    top_combined_features = coefs.sort_values(ascending=False).head(225).index.tolist()
     st.write("🏁 Top combined features selected:", top_combined_features)
 
     # --- Final output ---
@@ -652,7 +652,7 @@ if event_file is not None and today_file is not None:
         y_oos = y.iloc[-OOS_ROWS:].copy()
 
     # ===== Sampling for Streamlit Cloud =====
-    max_rows = 30000
+    max_rows = 15000
 
     # Add defensive checks
     if 'X_train' not in locals() or X_train.empty:
@@ -673,7 +673,7 @@ if event_file is not None and today_file is not None:
     st.write(f"✅ Final training data: {X_train.shape[0]} rows, {X_train.shape[1]} features")
 
     # ---- KFold Setup ----
-    n_splits = 3
+    n_splits = 5
     n_repeats = 1
     st.write(f"Preparing KFold splits: X {X_train.shape}, y {y_train.shape}, X_today {X_today_selected.shape}")
 
