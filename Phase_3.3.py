@@ -131,7 +131,7 @@ def overlay_multiplier(row):
         elif b_time_since_hr >= 7:  # 7+ days 
             edge *= 1.08  # Moderate boost
         elif b_time_since_hr <= 2:  # Recent HR (within 2 days)
-            edge *= 0.95  # Slight penalty
+            edge *= 1.15
     
     # --- NEW PATTERN 2: Fly Ball Rate Enhancement ---
     b_fb_rate = row.get("b_fb_rate_3", row.get("fb_rate", np.nan))
@@ -152,18 +152,6 @@ def overlay_multiplier(row):
             edge *= 1.12
         elif park_hr_rate <= 0.90:  # Pitcher friendly park
             edge *= 0.88
-    
-    # --- NEW PATTERN 4: Weather Combinations ---
-    wind = row.get("wind_mph", np.nan)
-    humidity = row.get("humidity", np.nan)
-    
-    # Calmer conditions boost (successful pattern)
-    if pd.notna(wind) and wind <= 8.0:
-        edge *= 1.06
-    
-    # Humidity boost (successful pattern)  
-    if pd.notna(humidity):
-        edge *= 1 + (humidity - 50) / 100
         
     # --- Get relevant values safely ---    
     wind = row.get("wind_mph", np.nan)    
